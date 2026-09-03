@@ -35,10 +35,11 @@
         let currentLat = null;
         let currentLon = null;
         let currentAlt = null;
-        
+        let currentSpeed = null;
+
         let watchId = null;
         let loggingInterval = null;
-        let logData = []; // Verilerin birikeceği dizi
+        let logData = [];
 
         // BLE Nabız Bağlantısı
         document.getElementById('btnHr').addEventListener('click', async () => {
@@ -78,6 +79,7 @@
                     currentLat = pos.coords.latitude.toFixed(6);
                     currentLon = pos.coords.longitude.toFixed(6);
                     currentAlt = pos.coords.altitude ? pos.coords.altitude.toFixed(1) : "";
+                    currentSpeed = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(2) : "0";
                     
                     document.getElementById('valLat').innerText = currentLat;
                     document.getElementById('valLon').innerText = currentLon;
@@ -88,12 +90,15 @@
 
             // Saniyede 1 kez mevcut durumu diziye kaydet (1 Hz Loglama)
             loggingInterval = setInterval(() => {
-                const timestamp = new Date().toISOString();
+                const now = new Date();
+                const isoZaman = now.toISOString(); // UTC zamanı
+                
                 logData.push({
-                    Time: timestamp,
+                    Time: isoZaman,
                     Latitude: currentLat,
                     Longitude: currentLon,
                     Altitude: currentAlt,
+                    Speed_kmh: currentSpeed,
                     HeartRate: currentHr
                 });
                 document.getElementById('valCount').innerText = logData.length;
@@ -103,22 +108,28 @@
             document.getElementById('btnStop').style.display = "inline-block";
         });
 
-        // Kaydı Bitir ve İndir (Post-Processing İçin)
+        // Kaydı Bitir ve İndir
         document.getElementById('btnStop').addEventListener('click', () => {
             clearInterval(loggingInterval);
-            navigator.geolocation.clearWatch(watchId);
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
             
-            // CSV Formatına Çevir
-            let csvContent = "data:text/csv;charset=utf-8,Time,Latitude,Longitude,Altitude,HeartRate\n";
+            let csvContent = "data:text/csv;charset=utf-8,Time,Latitude,Longitude,Altitude,Speed_kmh,HeartRate\n";
             logData.forEach(row => {
-                csvContent += `${row.Time},${row.Latitude},${row.Longitude},${row.Altitude},${row.HeartRate}\n`;
+                csvContent += `${row.Time},${row.Latitude},${row.Longitude},${row.Altitude},${row.Speed_kmh},${row.HeartRate}\n`;
             });
 
-            // Dosyayı İndir
+            // Okunabilir Dosya Adı Oluşturma
+            const now = new Date();
+            const tarihFormatli = now.getFullYear() + "-" + 
+                String(now.getMonth() + 1).padStart(2, '0') + "-" + 
+                String(now.getDate()).padStart(2, '0') + "_" + 
+                String(now.getHours()).padStart(2, '0') + "-" + 
+                String(now.getMinutes()).padStart(2, '0');
+
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Kosu_Log_${new Date().getTime()}.csv`);
+            link.setAttribute("download", `Kosu_Log_${tarihFormatli}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
