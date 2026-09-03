@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Biyomekanik Koşu Asistanı</title>
+    <!-- Ekranın uyumasını kesin olarak engelleyen NoSleep.js Kütüphanesi -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 10px; background-color: #f4f4f9; color: #333; touch-action: manipulation; }
         .card { background: white; margin: 10px auto; padding: 20px; border-radius: 8px; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
@@ -22,16 +24,16 @@
         .val { font-size: 22px; font-weight: bold; color: #2980b9; display: block; margin-top: 5px; }
         #hfStatus { color: #e67e22; font-size: 12px; font-weight: bold; margin-top: 10px; display: none; }
 
-        /* ZİFİRİ SİYAH CEP MODU KATMANI */
-        #pocketOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000; z-index: 9999; display: none; flex-direction: column; justify-content: center; align-items: center; user-select: none; }
-        #unlockBtn { width: 120px; height: 120px; border-radius: 50%; background-color: #222; border: 4px solid #444; color: #555; font-size: 40px; display: flex; justify-content: center; align-items: center; transition: all 0.2s; user-select: none; }
-        .pocket-text { color: #444; font-size: 12px; margin-top: 20px; font-weight: bold; }
+        /* ZİFİRİ SİYAH CEP MODU KATMANI (Dokunmatik işlemleri iptal eder) */
+        #pocketOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: #000; z-index: 9999; display: none; flex-direction: column; justify-content: center; align-items: center; user-select: none; touch-action: none; }
+        #unlockBtn { width: 120px; height: 120px; border-radius: 50%; background-color: #222; border: 4px solid #444; color: #555; font-size: 40px; display: flex; justify-content: center; align-items: center; transition: all 0.2s; user-select: none; touch-action: none; }
+        .pocket-text { color: #444; font-size: 12px; margin-top: 20px; font-weight: bold; text-align: center; padding: 0 20px;}
         .unlocking { background-color: #e74c3c !important; border-color: #c0392b !important; color: #fff !important; transform: scale(1.1); }
     </style>
 </head>
 <body>
 
-    <!-- CEP MODU (POCKET MODE) OVERLAY -->
+    <!-- CEP MODU OVERLAY -->
     <div id="pocketOverlay">
         <div id="unlockBtn">🔒</div>
         <div class="pocket-text">KİLİDİ AÇMAK İÇİN 3 SANİYE BASILI TUT</div>
@@ -42,6 +44,10 @@
         <div class="input-group">
             <label>Minimum Kadans: <span id="lblCadence" class="highlight">170</span></label>
             <input type="range" id="inpCadence" min="0" max="220" step="1" value="170">
+        </div>
+        <div class="input-group">
+            <label>Max Nabız Limiti: <span id="lblHr" class="highlight">140</span></label>
+            <input type="range" id="inpHr" min="0" max="200" step="1" value="140">
         </div>
         <div class="input-group">
             <label>Hedef Pace: <span id="lblPace" class="highlight">05:30</span></label>
@@ -67,6 +73,7 @@
     <script>
         // --- ARAYÜZ ---
         document.getElementById('inpCadence').addEventListener('input', function() { document.getElementById('lblCadence').innerText = this.value == 0 ? "Kapalı" : this.value; });
+        document.getElementById('inpHr').addEventListener('input', function() { document.getElementById('lblHr').innerText = this.value == 0 ? "Kapalı" : this.value; });
         document.getElementById('inpPace').addEventListener('input', function() { 
             if(this.value == 0) { document.getElementById('lblPace').innerText = "Kapalı"; return; }
             let m = Math.floor(this.value / 60); let s = this.value % 60; document.getElementById('lblPace').innerText = `${m}:${s.toString().padStart(2, '0')}`;
@@ -85,21 +92,14 @@
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
 
-        // --- DEĞİŞKENLER ---
+        // --- DEĞİŞKENLER & NOSLEEP MOTORU ---
         let isRunning = false; let watchId = null; let loggingInterval = null; let secondsElapsed = 0;
         let currentHr = null, currentLat = null, currentLon = null, currentAlt = null, currentSpeedKmh = 0, currentCadence = 0;
         let lastPeakTime = 0, stepTimestamps = [];
         let standardLogData = ["Time,Latitude,Longitude,Altitude,Speed_kmh,Pace,Cadence,HeartRate"];
         let biomechanicsLogData = ["Timestamp_ms,AccX,AccY,AccZ,GyroX,GyroY,GyroZ"];
-        let wakeLock = null;
-
-        // --- UYKU ENGELLEYİCİ (WAKE LOCK) ---
-        async function requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); console.log("Wake Lock Aktif"); }
-            } catch (err) { console.error("Wake Lock engellendi:", err); }
-        }
-        function releaseWakeLock() { if (wakeLock !== null) { wakeLock.release(); wakeLock = null; } }
+        
+        const noSleep = new NoSleep(); // Uyku engelleyici motor
 
         // --- CEP MODU (POCKET MODE) MANTIĞI ---
         const pocketOverlay = document.getElementById('pocketOverlay');
@@ -107,9 +107,8 @@
         let unlockTimer;
 
         document.getElementById('btnPocket').addEventListener('click', () => {
-            requestWakeLock();
             pocketOverlay.style.display = "flex";
-            sesliOku("Cep modu aktif. Telefonu cebinize yerleştirin.");
+            sesliOku("Cep modu aktif. Telefonu cebinize yerleştirebilirsiniz.");
         });
 
         function startUnlock() {
@@ -118,7 +117,7 @@
                 pocketOverlay.style.display = "none";
                 unlockBtn.classList.remove('unlocking');
                 sesliOku("Kilit açıldı.");
-            }, 3000); // 3 saniye basılı tutma süresi
+            }, 3000);
         }
         function cancelUnlock() {
             clearTimeout(unlockTimer);
@@ -127,7 +126,6 @@
 
         unlockBtn.addEventListener('mousedown', startUnlock);
         unlockBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startUnlock(); }, {passive: false});
-        
         unlockBtn.addEventListener('mouseup', cancelUnlock);
         unlockBtn.addEventListener('mouseleave', cancelUnlock);
         unlockBtn.addEventListener('touchend', (e) => { e.preventDefault(); cancelUnlock(); }, {passive: false});
@@ -149,6 +147,10 @@
         // --- BAŞLAT/DURDUR ---
         document.getElementById('btnStart').addEventListener('click', () => {
             if (!navigator.geolocation) { alert("GPS desteklenmiyor."); return; }
+            
+            // Kullanıcı etkileşimi ile uyku modunu kesin olarak devre dışı bırak
+            noSleep.enable();
+            
             if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
 
             document.getElementById('settingsCard').style.display = "none";
@@ -157,7 +159,6 @@
             document.getElementById('btnStop').style.display = "inline-block";
             document.getElementById('btnPocket').style.display = "inline-block";
             
-            requestWakeLock();
             sesliOku("Antrenman ve biyomekanik kayıt başladı.");
             isRunning = true;
 
@@ -180,7 +181,9 @@
         document.getElementById('btnStop').addEventListener('click', () => {
             isRunning = false; clearInterval(loggingInterval);
             if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-            releaseWakeLock();
+            
+            // Ekran koruması devreden çıkarılır
+            noSleep.disable();
             
             document.getElementById('hfStatus').style.display = "none";
             sesliOku("Antrenman bitti. İki dosya indiriliyor.");
