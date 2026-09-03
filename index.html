@@ -27,7 +27,8 @@
         <p>Güncel Nabız: <span class="val" id="valHr">--</span> BPM</p>
         <p>GPS Enlem: <span class="val" id="valLat">--</span></p>
         <p>GPS Boylam: <span class="val" id="valLon">--</span></p>
-        <p>Kayıtlı Satır: <span class="val" id="valCount">0</span></p>
+        <p>Hız: <span class="val" id="valSpeed">0</span> km/s</p>
+        <p>Kayıt Süresi: <span class="val" id="valCount">0</span> sn</p>
     </div>
 
     <script>
@@ -40,6 +41,17 @@
         let watchId = null;
         let loggingInterval = null;
         let logData = [];
+        let secondsElapsed = 0; // Geçen süreyi tutacağımız sayaç
+
+        // Sesli Asistan Fonksiyonu
+        function sesliOku(metin) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(metin);
+                utterance.lang = 'tr-TR'; // Türkçe okuması için
+                utterance.rate = 1.0;     // Konuşma hızı
+                window.speechSynthesis.speak(utterance);
+            }
+        }
 
         // BLE Nabız Bağlantısı
         document.getElementById('btnHr').addEventListener('click', async () => {
@@ -61,6 +73,7 @@
                 
                 document.getElementById('btnHr').innerText = "Nabız Bandı Bağlandı";
                 document.getElementById('btnHr').style.backgroundColor = "#27ae60";
+                sesliOku("Nabız sensörü bağlandı.");
             } catch (error) {
                 alert("Bağlantı Hatası: " + error);
             }
@@ -73,25 +86,31 @@
                 return;
             }
 
-            // GPS'i izlemeye başla (Yüksek Doğruluk)
+            // Tarayıcı güvenlik kısıtlamasını aşmak için ilk tıklandığında boş bir ses çalıyoruz
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+            }
+
+            sesliOku("Antrenman başlatılıyor. İyi koşular.");
+
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     currentLat = pos.coords.latitude.toFixed(6);
                     currentLon = pos.coords.longitude.toFixed(6);
                     currentAlt = pos.coords.altitude ? pos.coords.altitude.toFixed(1) : "";
-                    currentSpeed = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(2) : "0";
+                    currentSpeed = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(1) : "0";
                     
                     document.getElementById('valLat').innerText = currentLat;
                     document.getElementById('valLon').innerText = currentLon;
+                    document.getElementById('valSpeed').innerText = currentSpeed;
                 },
                 (err) => console.error(err),
                 { enableHighAccuracy: true, maximumAge: 0 }
             );
 
-            // Saniyede 1 kez mevcut durumu diziye kaydet (1 Hz Loglama)
             loggingInterval = setInterval(() => {
                 const now = new Date();
-                const isoZaman = now.toISOString(); // UTC zamanı
+                const isoZaman = now.toISOString();
                 
                 logData.push({
                     Time: isoZaman,
@@ -101,7 +120,20 @@
                     Speed_kmh: currentSpeed,
                     HeartRate: currentHr
                 });
-                document.getElementById('valCount').innerText = logData.length;
+                
+                secondsElapsed++;
+                document.getElementById('valCount').innerText = secondsElapsed;
+
+                // HER 60 SANİYEDE BİR BİLGİ VER
+                if (secondsElapsed > 0 && secondsElapsed % 60 === 0) {
+                    let dakika = secondsElapsed / 60;
+                    let duyuru = `Geçen süre ${dakika} dakika. `;
+                    if (currentHr) duyuru += `Nabız ${currentHr}. `;
+                    if (currentSpeed > 0) duyuru += `Hız saatte ${currentSpeed} kilometre.`;
+                    
+                    sesliOku(duyuru);
+                }
+
             }, 1000);
 
             document.getElementById('btnStart').style.display = "none";
@@ -113,12 +145,13 @@
             clearInterval(loggingInterval);
             if (watchId !== null) navigator.geolocation.clearWatch(watchId);
             
+            sesliOku("Antrenman bitirildi. Veriler kaydediliyor.");
+
             let csvContent = "data:text/csv;charset=utf-8,Time,Latitude,Longitude,Altitude,Speed_kmh,HeartRate\n";
             logData.forEach(row => {
                 csvContent += `${row.Time},${row.Latitude},${row.Longitude},${row.Altitude},${row.Speed_kmh},${row.HeartRate}\n`;
             });
 
-            // Okunabilir Dosya Adı Oluşturma
             const now = new Date();
             const tarihFormatli = now.getFullYear() + "-" + 
                 String(now.getMonth() + 1).padStart(2, '0') + "-" + 
