@@ -3,32 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koşu Veri Toplayıcı</title>
+    <title>Akıllı Koşu Asistanı</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background-color: #f4f4f9; }
-        .card { background: white; margin: 15px auto; padding: 20px; border-radius: 8px; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        button { padding: 15px 25px; font-size: 16px; margin: 10px; border: none; border-radius: 5px; cursor: pointer; color: white; width: 80%; font-weight: bold; }
+        body { font-family: Arial, sans-serif; text-align: center; padding: 10px; background-color: #f4f4f9; color: #333; }
+        .card { background: white; margin: 10px auto; padding: 20px; border-radius: 8px; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        .input-group label { font-size: 14px; font-weight: bold; color: #2c3e50; }
+        .input-group input { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
+        button { padding: 15px 25px; font-size: 16px; margin: 10px 0; border: none; border-radius: 5px; cursor: pointer; color: white; width: 100%; font-weight: bold; }
         #btnHr { background-color: #e74c3c; }
         #btnStart { background-color: #2ecc71; }
         #btnStop { background-color: #34495e; display: none; }
-        .val { font-size: 24px; font-weight: bold; color: #2c3e50; }
+        .grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
+        .stat { width: 45%; background: #ecf0f1; margin-bottom: 10px; padding: 10px; border-radius: 5px; box-sizing: border-box; }
+        .val { font-size: 22px; font-weight: bold; color: #2980b9; display: block; margin-top: 5px; }
+        small { color: #7f8c8d; font-size: 12px; }
     </style>
 </head>
 <body>
 
-    <div class="card">
-        <h2>Sensör Bağlantıları</h2>
-        <button id="btnHr">1. Nabız Bandına Bağlan</button>
-        <button id="btnStart">2. GPS ve Kaydı Başlat</button>
-        <button id="btnStop">3. Kaydı Bitir ve CSV İndir</button>
+    <div class="card" id="settingsCard">
+        <h3>Hedefler & Alarmlar</h3>
+        <div class="input-group">
+            <label>1. Minimum Kadans (Adım/Dk):</label>
+            <input type="number" id="inpCadence" value="170">
+            <small>0 girerseniz takip edilmez.</small>
+        </div>
+        <div class="input-group">
+            <label>2. Max Nabız Üst Limiti (BPM):</label>
+            <input type="number" id="inpHr" value="140">
+            <small>0 girerseniz takip edilmez.</small>
+        </div>
+        <div class="input-group">
+            <label>3. Hedef Pace (dk:sn, Örn: 05:30):</label>
+            <input type="text" id="inpPace" placeholder="Boş bırakılabilir">
+            <small>Aşıldığında (%10 alt/üst sapma) uyarır.</small>
+        </div>
     </div>
 
     <div class="card">
-        <p>Güncel Nabız: <span class="val" id="valHr">--</span> BPM</p>
-        <p>GPS Enlem: <span class="val" id="valLat">--</span></p>
-        <p>GPS Boylam: <span class="val" id="valLon">--</span></p>
-        <p>Hız: <span class="val" id="valSpeed">0</span> km/s</p>
-        <p>Kayıt Süresi: <span class="val" id="valCount">0</span> sn</p>
+        <button id="btnHr">Nabız Bandına Bağlan</button>
+        <button id="btnStart">GPS & Kaydı Başlat</button>
+        <button id="btnStop">Kaydı Bitir ve CSV İndir</button>
+    </div>
+
+    <div class="card grid" id="dataCard">
+        <div class="stat">Nabız<span class="val" id="valHr">--</span></div>
+        <div class="stat">Kadans<span class="val" id="valCadence">--</span></div>
+        <div class="stat">Pace<span class="val" id="valPace">--:--</span></div>
+        <div class="stat">Süre<span class="val" id="valCount">0 sn</span></div>
     </div>
 
     <script>
@@ -36,24 +59,53 @@
         let currentLat = null;
         let currentLon = null;
         let currentAlt = null;
-        let currentSpeed = null;
+        let currentSpeedKmh = 0;
+        let currentCadence = 0;
+        
+        // Pedometer Değişkenleri
+        let lastPeakTime = 0;
+        let stepTimestamps = [];
 
         let watchId = null;
         let loggingInterval = null;
         let logData = [];
-        let secondsElapsed = 0; // Geçen süreyi tutacağımız sayaç
+        let secondsElapsed = 0;
+        let isRunning = false;
 
-        // Sesli Asistan Fonksiyonu
         function sesliOku(metin) {
             if ('speechSynthesis' in window) {
                 const utterance = new SpeechSynthesisUtterance(metin);
-                utterance.lang = 'tr-TR'; // Türkçe okuması için
-                utterance.rate = 1.0;     // Konuşma hızı
+                utterance.lang = 'tr-TR';
                 window.speechSynthesis.speak(utterance);
             }
         }
 
-        // BLE Nabız Bağlantısı
+        function getPaceString(speedKmh) {
+            if (!speedKmh || speedKmh < 1.5) return "--:--";
+            let paceSec = Math.round(3600 / speedKmh);
+            let m = Math.floor(paceSec / 60);
+            let s = paceSec % 60;
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        // Basit İvmeölçer (Kadans Tespiti)
+        window.addEventListener('devicemotion', (e) => {
+            if (!isRunning) return;
+            let acc = e.accelerationIncludingGravity;
+            if (!acc || acc.x === null) return;
+            
+            // Yerçekimi dahil ivme vektörü büyüklüğü
+            let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2) - 9.81;
+            let now = Date.now();
+            
+            // Adım darbe eşiği (5 m/s^2)
+            if (Math.abs(mag) > 5 && (now - lastPeakTime > 250)) { 
+                stepTimestamps.push(now);
+                lastPeakTime = now;
+            }
+        });
+
+        // BLE Nabız
         document.getElementById('btnHr').addEventListener('click', async () => {
             try {
                 const device = await navigator.bluetooth.requestDevice({
@@ -79,59 +131,96 @@
             }
         });
 
-        // GPS ve Loglama Başlatma
+        // Başlat
         document.getElementById('btnStart').addEventListener('click', () => {
             if (!navigator.geolocation) {
-                alert("Tarayıcınız GPS desteklemiyor.");
-                return;
+                alert("GPS desteklenmiyor."); return;
             }
 
-            // Tarayıcı güvenlik kısıtlamasını aşmak için ilk tıklandığında boş bir ses çalıyoruz
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+            // Sesi aktifleştirmek için boş okuma
+            if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+
+            // Hedef Değerleri Okuma
+            let targetCadence = parseInt(document.getElementById('inpCadence').value) || 0;
+            let targetHr = parseInt(document.getElementById('inpHr').value) || 0;
+            
+            let paceStr = document.getElementById('inpPace').value;
+            let targetPaceSec = 0;
+            if (paceStr && paceStr.includes(':')) {
+                let parts = paceStr.split(':');
+                targetPaceSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
             }
 
-            sesliOku("Antrenman başlatılıyor. İyi koşular.");
+            document.getElementById('settingsCard').style.display = "none";
+            sesliOku("Antrenman başladı.");
+            isRunning = true;
 
+            // GPS Takibi
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     currentLat = pos.coords.latitude.toFixed(6);
                     currentLon = pos.coords.longitude.toFixed(6);
                     currentAlt = pos.coords.altitude ? pos.coords.altitude.toFixed(1) : "";
-                    currentSpeed = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(1) : "0";
-                    
-                    document.getElementById('valLat').innerText = currentLat;
-                    document.getElementById('valLon').innerText = currentLon;
-                    document.getElementById('valSpeed').innerText = currentSpeed;
+                    currentSpeedKmh = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(2) : 0;
+                    document.getElementById('valPace').innerText = getPaceString(currentSpeedKmh);
                 },
                 (err) => console.error(err),
                 { enableHighAccuracy: true, maximumAge: 0 }
             );
 
+            // Saniyelik Loglama ve Kadans Hesabı
             loggingInterval = setInterval(() => {
-                const now = new Date();
-                const isoZaman = now.toISOString();
-                
+                secondsElapsed++;
+                document.getElementById('valCount').innerText = secondsElapsed + " sn";
+
+                // Kadans Hesabı: Son 10 saniyedeki adımları alıp dakikaya oranla
+                let onSaniyeOnce = Date.now() - 10000;
+                stepTimestamps = stepTimestamps.filter(t => t > onSaniyeOnce);
+                currentCadence = stepTimestamps.length * 6; // 10 saniye * 6 = 1 dakika
+                document.getElementById('valCadence').innerText = currentCadence;
+
                 logData.push({
-                    Time: isoZaman,
+                    Time: new Date().toISOString(),
                     Latitude: currentLat,
                     Longitude: currentLon,
                     Altitude: currentAlt,
-                    Speed_kmh: currentSpeed,
+                    Speed_kmh: currentSpeedKmh,
+                    Pace: getPaceString(currentSpeedKmh),
+                    Cadence: currentCadence,
                     HeartRate: currentHr
                 });
-                
-                secondsElapsed++;
-                document.getElementById('valCount').innerText = secondsElapsed;
 
-                // HER 60 SANİYEDE BİR BİLGİ VER
-                if (secondsElapsed > 0 && secondsElapsed % 60 === 0) {
-                    let dakika = secondsElapsed / 60;
-                    let duyuru = `Geçen süre ${dakika} dakika. `;
-                    if (currentHr) duyuru += `Nabız ${currentHr}. `;
-                    if (currentSpeed > 0) duyuru += `Hız saatte ${currentSpeed} kilometre.`;
-                    
-                    sesliOku(duyuru);
+                // ALARM KONTROLÜ (HER 15 SANİYEDE BİR)
+                if (secondsElapsed % 15 === 0) {
+                    let warnings = [];
+
+                    // 1. Kadans Kontrolü
+                    if (targetCadence > 0 && currentCadence > 0 && currentCadence < targetCadence) {
+                        warnings.push("Kadans düşük.");
+                    }
+
+                    // 2. Nabız Kontrolü
+                    if (targetHr > 0 && currentHr !== null && currentHr > targetHr) {
+                        warnings.push("Nabız yüksek.");
+                    }
+
+                    // 3. Pace Kontrolü (Hız 3 km/h'den büyükse çalışsın ki dururken gereksiz uyarmasın)
+                    if (targetPaceSec > 0 && currentSpeedKmh > 3) {
+                        let currentPaceSec = 3600 / currentSpeedKmh;
+                        let minPace = targetPaceSec * 0.9; // Daha az saniye (çok hızlı)
+                        let maxPace = targetPaceSec * 1.1; // Daha çok saniye (çok yavaş)
+
+                        if (currentPaceSec > maxPace) {
+                            warnings.push("Pace yavaş.");
+                        } else if (currentPaceSec < minPace) {
+                            warnings.push("Pace hızlı.");
+                        }
+                    }
+
+                    // Eğer ihlal varsa seslendir
+                    if (warnings.length > 0) {
+                        sesliOku(warnings.join(" "));
+                    }
                 }
 
             }, 1000);
@@ -140,29 +229,26 @@
             document.getElementById('btnStop').style.display = "inline-block";
         });
 
-        // Kaydı Bitir ve İndir
+        // Durdur ve CSV İndir
         document.getElementById('btnStop').addEventListener('click', () => {
+            isRunning = false;
             clearInterval(loggingInterval);
             if (watchId !== null) navigator.geolocation.clearWatch(watchId);
             
-            sesliOku("Antrenman bitirildi. Veriler kaydediliyor.");
+            sesliOku("Antrenman bitti.");
 
-            let csvContent = "data:text/csv;charset=utf-8,Time,Latitude,Longitude,Altitude,Speed_kmh,HeartRate\n";
+            let csvContent = "data:text/csv;charset=utf-8,Time,Latitude,Longitude,Altitude,Speed_kmh,Pace,Cadence,HeartRate\n";
             logData.forEach(row => {
-                csvContent += `${row.Time},${row.Latitude},${row.Longitude},${row.Altitude},${row.Speed_kmh},${row.HeartRate}\n`;
+                csvContent += `${row.Time},${row.Latitude},${row.Longitude},${row.Altitude},${row.Speed_kmh},${row.Pace},${row.Cadence},${row.HeartRate}\n`;
             });
 
             const now = new Date();
-            const tarihFormatli = now.getFullYear() + "-" + 
-                String(now.getMonth() + 1).padStart(2, '0') + "-" + 
-                String(now.getDate()).padStart(2, '0') + "_" + 
-                String(now.getHours()).padStart(2, '0') + "-" + 
-                String(now.getMinutes()).padStart(2, '0');
+            const dosyaTarih = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0') + "_" + String(now.getHours()).padStart(2, '0') + "-" + String(now.getMinutes()).padStart(2, '0');
 
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Kosu_Log_${tarihFormatli}.csv`);
+            link.setAttribute("download", `Kosu_Log_${dosyaTarih}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
