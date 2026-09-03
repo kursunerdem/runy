@@ -7,37 +7,63 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 10px; background-color: #f4f4f9; color: #333; }
         .card { background: white; margin: 10px auto; padding: 20px; border-radius: 8px; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        .input-group { margin-bottom: 15px; text-align: left; }
-        .input-group label { font-size: 14px; font-weight: bold; color: #2c3e50; }
-        .input-group input { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
-        button { padding: 15px 25px; font-size: 16px; margin: 10px 0; border: none; border-radius: 5px; cursor: pointer; color: white; width: 100%; font-weight: bold; }
+        
+        /* Slider Tasarımı */
+        .input-group { margin-bottom: 20px; text-align: left; background: #fafafa; padding: 15px; border-radius: 8px; border: 1px solid #eee; }
+        .input-group label { font-size: 15px; font-weight: bold; color: #2c3e50; display: flex; justify-content: space-between; align-items: center;}
+        .highlight { color: #e74c3c; font-size: 20px; font-weight: 900; }
+        
+        input[type=range] {
+            width: 100%;
+            height: 12px;
+            -webkit-appearance: none;
+            background: #dcdde1;
+            outline: none;
+            border-radius: 10px;
+            margin: 15px 0 5px 0;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #3498db;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+
+        button { padding: 15px 25px; font-size: 16px; margin: 10px 0; border: none; border-radius: 5px; cursor: pointer; color: white; width: 100%; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         #btnHr { background-color: #e74c3c; }
         #btnStart { background-color: #2ecc71; }
         #btnStop { background-color: #34495e; display: none; }
+        
         .grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
         .stat { width: 45%; background: #ecf0f1; margin-bottom: 10px; padding: 10px; border-radius: 5px; box-sizing: border-box; }
         .val { font-size: 22px; font-weight: bold; color: #2980b9; display: block; margin-top: 5px; }
-        small { color: #7f8c8d; font-size: 12px; }
     </style>
 </head>
 <body>
 
     <div class="card" id="settingsCard">
         <h3>Hedefler & Alarmlar</h3>
+        
         <div class="input-group">
-            <label>1. Minimum Kadans (Adım/Dk):</label>
-            <input type="number" id="inpCadence" value="170">
-            <small>0 girerseniz takip edilmez.</small>
+            <label>Minimum Kadans: <span id="lblCadence" class="highlight">170</span></label>
+            <input type="range" id="inpCadence" min="0" max="220" step="1" value="170">
+            <small style="color:#7f8c8d; font-size:12px;">0 = Takip Kapalı</small>
         </div>
+
         <div class="input-group">
-            <label>2. Max Nabız Üst Limiti (BPM):</label>
-            <input type="number" id="inpHr" value="140">
-            <small>0 girerseniz takip edilmez.</small>
+            <label>Max Nabız Limiti: <span id="lblHr" class="highlight">140</span></label>
+            <input type="range" id="inpHr" min="0" max="200" step="1" value="140">
+            <small style="color:#7f8c8d; font-size:12px;">0 = Takip Kapalı</small>
         </div>
+
         <div class="input-group">
-            <label>3. Hedef Pace (dk:sn, Örn: 05:30):</label>
-            <input type="text" id="inpPace" placeholder="Boş bırakılabilir">
-            <small>Aşıldığında (%10 alt/üst sapma) uyarır.</small>
+            <label>Hedef Pace: <span id="lblPace" class="highlight">05:30</span></label>
+            <input type="range" id="inpPace" min="0" max="600" step="5" value="330">
+            <small style="color:#7f8c8d; font-size:12px;">0 = Takip Kapalı | %10 sapmada uyarır</small>
         </div>
     </div>
 
@@ -55,6 +81,27 @@
     </div>
 
     <script>
+        // --- SLIDER (KAYDIRMA) GÜNCELLEMELERİ ---
+        document.getElementById('inpCadence').addEventListener('input', function() {
+            document.getElementById('lblCadence').innerText = this.value == 0 ? "Kapalı" : this.value;
+        });
+
+        document.getElementById('inpHr').addEventListener('input', function() {
+            document.getElementById('lblHr').innerText = this.value == 0 ? "Kapalı" : this.value;
+        });
+
+        function saniyeyiPaceYap(saniye) {
+            if (saniye == 0) return "Kapalı";
+            let m = Math.floor(saniye / 60);
+            let s = saniye % 60;
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        document.getElementById('inpPace').addEventListener('input', function() {
+            document.getElementById('lblPace').innerText = saniyeyiPaceYap(this.value);
+        });
+
+        // --- KOŞU DEĞİŞKENLERİ ---
         let currentHr = null;
         let currentLat = null;
         let currentLon = null;
@@ -62,7 +109,6 @@
         let currentSpeedKmh = 0;
         let currentCadence = 0;
         
-        // Pedometer Değişkenleri
         let lastPeakTime = 0;
         let stepTimestamps = [];
 
@@ -88,17 +134,15 @@
             return `${m}:${s.toString().padStart(2, '0')}`;
         }
 
-        // Basit İvmeölçer (Kadans Tespiti)
+        // Basit İvmeölçer (Kadans)
         window.addEventListener('devicemotion', (e) => {
             if (!isRunning) return;
             let acc = e.accelerationIncludingGravity;
             if (!acc || acc.x === null) return;
             
-            // Yerçekimi dahil ivme vektörü büyüklüğü
             let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2) - 9.81;
             let now = Date.now();
             
-            // Adım darbe eşiği (5 m/s^2)
             if (Math.abs(mag) > 5 && (now - lastPeakTime > 250)) { 
                 stepTimestamps.push(now);
                 lastPeakTime = now;
@@ -137,25 +181,18 @@
                 alert("GPS desteklenmiyor."); return;
             }
 
-            // Sesi aktifleştirmek için boş okuma
             if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
 
-            // Hedef Değerleri Okuma
-            let targetCadence = parseInt(document.getElementById('inpCadence').value) || 0;
-            let targetHr = parseInt(document.getElementById('inpHr').value) || 0;
-            
-            let paceStr = document.getElementById('inpPace').value;
-            let targetPaceSec = 0;
-            if (paceStr && paceStr.includes(':')) {
-                let parts = paceStr.split(':');
-                targetPaceSec = parseInt(parts[0]) * 60 + parseInt(parts[1]);
-            }
+            // Değerleri Slider'dan Al
+            let targetCadence = parseInt(document.getElementById('inpCadence').value);
+            let targetHr = parseInt(document.getElementById('inpHr').value);
+            let targetPaceSec = parseInt(document.getElementById('inpPace').value);
 
             document.getElementById('settingsCard').style.display = "none";
             sesliOku("Antrenman başladı.");
             isRunning = true;
 
-            // GPS Takibi
+            // GPS
             watchId = navigator.geolocation.watchPosition(
                 (pos) => {
                     currentLat = pos.coords.latitude.toFixed(6);
@@ -168,15 +205,14 @@
                 { enableHighAccuracy: true, maximumAge: 0 }
             );
 
-            // Saniyelik Loglama ve Kadans Hesabı
+            // Loglama & Kontrol
             loggingInterval = setInterval(() => {
                 secondsElapsed++;
                 document.getElementById('valCount').innerText = secondsElapsed + " sn";
 
-                // Kadans Hesabı: Son 10 saniyedeki adımları alıp dakikaya oranla
                 let onSaniyeOnce = Date.now() - 10000;
                 stepTimestamps = stepTimestamps.filter(t => t > onSaniyeOnce);
-                currentCadence = stepTimestamps.length * 6; // 10 saniye * 6 = 1 dakika
+                currentCadence = stepTimestamps.length * 6; 
                 document.getElementById('valCadence').innerText = currentCadence;
 
                 logData.push({
@@ -190,25 +226,22 @@
                     HeartRate: currentHr
                 });
 
-                // ALARM KONTROLÜ (HER 15 SANİYEDE BİR)
+                // HER 15 SANİYEDE BİR ALARM KONTROLÜ
                 if (secondsElapsed % 15 === 0) {
                     let warnings = [];
 
-                    // 1. Kadans Kontrolü
                     if (targetCadence > 0 && currentCadence > 0 && currentCadence < targetCadence) {
                         warnings.push("Kadans düşük.");
                     }
 
-                    // 2. Nabız Kontrolü
                     if (targetHr > 0 && currentHr !== null && currentHr > targetHr) {
                         warnings.push("Nabız yüksek.");
                     }
 
-                    // 3. Pace Kontrolü (Hız 3 km/h'den büyükse çalışsın ki dururken gereksiz uyarmasın)
                     if (targetPaceSec > 0 && currentSpeedKmh > 3) {
                         let currentPaceSec = 3600 / currentSpeedKmh;
-                        let minPace = targetPaceSec * 0.9; // Daha az saniye (çok hızlı)
-                        let maxPace = targetPaceSec * 1.1; // Daha çok saniye (çok yavaş)
+                        let minPace = targetPaceSec * 0.9;
+                        let maxPace = targetPaceSec * 1.1;
 
                         if (currentPaceSec > maxPace) {
                             warnings.push("Pace yavaş.");
@@ -217,19 +250,17 @@
                         }
                     }
 
-                    // Eğer ihlal varsa seslendir
                     if (warnings.length > 0) {
                         sesliOku(warnings.join(" "));
                     }
                 }
-
             }, 1000);
 
             document.getElementById('btnStart').style.display = "none";
             document.getElementById('btnStop').style.display = "inline-block";
         });
 
-        // Durdur ve CSV İndir
+        // Durdur
         document.getElementById('btnStop').addEventListener('click', () => {
             isRunning = false;
             clearInterval(loggingInterval);
