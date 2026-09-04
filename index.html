@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Biyomekanik Kayıt</title>
-    <!-- Ekranın uyumasını engelleyen NoSleep.js Kütüphanesi -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nosleep/0.12.0/NoSleep.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; text-align: center; padding: 10px; background-color: #f4f4f9; color: #333; touch-action: manipulation; }
@@ -85,9 +84,14 @@
             let m = Math.floor(paceSec / 60); let s = paceSec % 60; return `${m}:${s.toString().padStart(2, '0')}`;
         }
         function sesliOku(metin) { if ('speechSynthesis' in window) { const utterance = new SpeechSynthesisUtterance(metin); utterance.lang = 'tr-TR'; window.speechSynthesis.speak(utterance); } }
-        function downloadCSV(csvContent, filename) {
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob);
-            const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", filename);
+        
+        // Dinamik dosya indirme fonksiyonu (Mime Tipi Destekli)
+        function downloadFile(content, filename, mimeType = 'text/csv;charset=utf-8;') {
+            const blob = new Blob([content], { type: mimeType }); 
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a"); 
+            link.setAttribute("href", url); 
+            link.setAttribute("download", filename);
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
 
@@ -214,14 +218,31 @@
             noSleep.disable(); exitFullscreen();
             
             document.getElementById('hfStatus').style.display = "none";
-            sesliOku("Antrenman bitti. İki dosya indiriliyor.");
+            sesliOku("Antrenman bitti. Dosyalar derleniyor.");
 
             const now = new Date();
             const tarih = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, '0') + "-" + String(now.getDate()).padStart(2, '0') + "_" + String(now.getHours()).padStart(2, '0') + "-" + String(now.getMinutes()).padStart(2, '0');
 
-            downloadCSV(standardLogData.join("\n"), `Kosu_Genel_${tarih}.csv`);
-            setTimeout(() => { downloadCSV(biomechanicsLogData.join("\n"), `Biyomekanik_${tarih}.csv`); }, 500);
-            
+            // 1. GPX Formatını Oluştur (Strava için)
+            let gpxContent = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx creator="Runy Biyomekanik" version="1.1" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">\n  <trk>\n    <name>Koşu Antrenmanı</name>\n    <trkseg>\n`;
+            for(let i=1; i<standardLogData.length; i++) {
+                let cols = standardLogData[i].split(',');
+                if(cols.length >= 8 && cols[1] && cols[2] && cols[1] !== "null" && cols[1] !== "0.000000") {
+                    let cad = Math.round((parseFloat(cols[6]) || 0) / 2); // 190 SPM -> 95 RPM (Strava Standardı)
+                    let hr = Math.round(parseFloat(cols[7]) || 0);
+                    gpxContent += `      <trkpt lat="${cols[1]}" lon="${cols[2]}">\n        <ele>${cols[3] || 0}</ele>\n        <time>${cols[0]}</time>\n        <extensions>\n          <gpxtpx:TrackPointExtension>\n`;
+                    if(hr > 0) gpxContent += `            <gpxtpx:hr>${hr}</gpxtpx:hr>\n`;
+                    if(cad > 0) gpxContent += `            <gpxtpx:cad>${cad}</gpxtpx:cad>\n`;
+                    gpxContent += `          </gpxtpx:TrackPointExtension>\n        </extensions>\n      </trkpt>\n`;
+                }
+            }
+            gpxContent += `    </trkseg>\n  </trk>\n</gpx>`;
+
+            // İndirme Zinciri (Gecikmeli tetikleme, tarayıcı engelini aşmak için)
+            downloadFile(gpxContent, `Strava_Kosu_${tarih}.gpx`, 'application/gpx+xml'); // Önce Strava
+            setTimeout(() => { downloadFile(standardLogData.join("\n"), `Kosu_Genel_${tarih}.csv`); }, 500); // Sonra Makro
+            setTimeout(() => { downloadFile(biomechanicsLogData.join("\n"), `Biyomekanik_${tarih}.csv`); }, 1000); // Sonra Mikro
+
             document.getElementById('btnStop').innerText = "Kayıt Tamamlandı"; document.getElementById('btnPocket').style.display = "none";
         });
     </script>
